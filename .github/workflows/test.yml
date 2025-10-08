@@ -1,0 +1,27 @@
+name: Test build
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+
+jobs:
+  build-publish-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Log in to Mirantis Secure Registry
+        uses: docker/login-action@v3
+        env:
+          REGISTRY_ENDPOINT: registry.ci.mirantis.com
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_CI_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_CI_PASSWORD }}
+      - name: Docker login to prod MSR
+        uses: docker/login-action@v3
+        with:
+          REGISTRY_ENDPOINT: registry.mirantis.com
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_PROD_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PROD_PASSWORD }}
