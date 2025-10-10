@@ -1,0 +1,88 @@
+name: build-downstream-images-action
+
+on:
+  pull_request:
+    branches:
+      - '*-backports'
+  push:
+    branches:
+    - '*-backports'
+
+permissions:
+  contents: read
+
+jobs:
+  build_CAPM3:
+    runs-on: ubuntu-latest
+    env:
+      DEV_REGISTRY_ENDPOINT: registry.ci.mirantis.com
+      PROD_REGISTRY_ENDPOINT: registry.mirantis.com
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '^1.24.6' # match version from Makefile
+
+      - name: Get version
+        id: version
+        run: |
+          git_tag=$(git describe --tags --abbrev=0)
+          git_commit_hash=$(git rev-parse --short HEAD)
+          git_version=$git_tag-$git_commit_hash
+          echo "VERSION=$git_version" >> "$GITHUB_OUTPUT"
+          echo "Using image version: $git_version"
+
+      - name: Set target registry
+        id: registry
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "REGISTRY=${{ env.PROD_REGISTRY_ENDPOINT }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "REGISTRY=${{ env.DEV_REGISTRY_ENDPOINT }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Docker login to dev MSR
+        if: github.event_name == 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DEV_REGISTRY_ENDPOINT }}
+          username: ${{ secrets.REGISTRY_CI_USERNAME }}
+          password: ${{ secrets.REGISTRY_CI_PASSWORD }}
+
+      - name: Docker login to prod MSR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.PROD_REGISTRY_ENDPOINT }}
+          username: ${{ secrets.REGISTRY_PROD_USERNAME }}
+          password: ${{ secrets.REGISTRY_PROD_PASSWORD }}
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          make unit
+
+      - name: Build and push image
+        shell: bash
+        env:
+          CONTROLLER_IMG: ${{ steps.registry.outputs.registry }}/k0rdent-bm/images/metal3-io/cluster-api-provider-metal3
+          TAG: ${{ steps.version.outputs.version }}
+        run: |
+          make CONTROLLER_IMG=${CONTROLLER_IMG} TAG=${TAG} docker-build docker-push
+
+      - name: Write build summary
+        shell: bash
+        run: |
+          echo "## Images Digest" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| Source Repository | ${{ github.repository }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Git Reference | ${{ github.ref }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Git Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Path | ${{ steps.registry.outputs.registry }}/k0rdent-bm/images/metal3-io/cluster-api-provider-metal3-amd64:${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
